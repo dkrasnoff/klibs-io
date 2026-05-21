@@ -63,14 +63,33 @@ Explicit list.
 ## 9. Key entities (only if data model changes)
 - **<EntityName>:** purpose, key fields, relationships, lifecycle
 
-## 10. Test strategy
+## 10. Database schema diagram (only if schema changes)
+*Mermaid ER diagram of the resulting tables. Mark new tables/columns with `(new)`, removed ones with `(removed)`. Skip if schema is unchanged. Renders natively in GitHub and IntelliJ.*
+
+```mermaid
+erDiagram
+    PROJECT ||--o{ PROJECT_CATEGORY : has
+    CATEGORY ||--o{ PROJECT_CATEGORY : tags
+    CATEGORY {
+        bigint id PK
+        string name
+        bigint parent_id FK "(new)"
+    }
+    PROJECT_CATEGORY {
+        bigint project_id FK
+        bigint category_id FK
+        float confidence "(new)"
+    }
+```
+
+## 11. Test strategy
 - **Unit:** which classes, mocking boundary
 - **DB-integration:** `BaseUnitWithDbLayerTest` subclasses; method-level `@Sql` seeds
 - **Web / smoke:** `SmokeTestBase` for new endpoints
 - *Reviewer-only — manual / staging:* what to verify on `klibs-features` / `klibs-stage`
 
-## 11. Assumptions
+## 12. Assumptions
 - …
 
-## 12. References
+## 13. References
 - Design docs, related specs, prior art
