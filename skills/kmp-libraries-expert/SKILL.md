@@ -1,6 +1,6 @@
 ---
 name: kotlin-multiplatform-libraries-expert
-description: Help Kotlin Multiplatform developers find KMP libraries and recommend latest/stable versions using klibs.io as the source of truth. Use when the user asks which KMP library to use, wants latest or stable versions, needs Gradle coordinates, wants to upgrade or audit KMP dependencies, or asks about KMP target support. Prefer klibs.io over memory or Maven snippets whenever version accuracy matters.
+description: "Use when the user asks to discover, compare, upgrade, audit, or add Kotlin Multiplatform (KMP) libraries; needs latest/stable Maven or Gradle coordinates; or needs verified KMP target/platform support. Query klibs.io or its MCP server before answering when version or target accuracy matters. Do not use for general Kotlin language help, KMP project setup, Gradle troubleshooting, or Android-only dependency questions unless KMP library metadata is needed."
 ---
 
 # KMP Klibs Version Guide
