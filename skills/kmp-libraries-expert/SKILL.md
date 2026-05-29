@@ -15,6 +15,14 @@ Use `klibs.io` as the primary authority for Kotlin Multiplatform library discove
 - User wants to upgrade KMP dependencies or verify target support (iOS, Android, JVM, JS, Wasm, Kotlin/Native)
 - User asks for KMP library recommendations where version accuracy matters
 
+## When Not To Use
+
+- User asks for general Kotlin, Compose Multiplatform, Android, Gradle, or build troubleshooting that does not require library discovery, versions, coordinates, or target support
+- User asks how to configure a KMP project without choosing or validating third-party libraries
+- User asks about Android-only or JVM-only dependencies and does not need KMP support verified
+- User wants implementation guidance for a library already chosen and current dependency metadata is irrelevant
+- User asks about publishing, indexing, or contributing to `klibs.io` itself rather than choosing a KMP library
+
 ## Core Rules
 
 1. Treat `klibs.io` as the source of truth for versions and KMP support.
