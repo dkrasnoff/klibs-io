@@ -20,22 +20,22 @@ This document provides guidelines and instructions for developing and testing th
 
 ### Building the Project
 
-The project uses [Amper](https://amper.org/) as its build system. To build the project:
+The project uses [Kotlin Toolchain](https://kotlin-toolchain.org/dev/) as its build system. To build the project:
 
 ```bash
-./amper build
+./kotlin build
 ```
 
-To run tests separately (build alone does not execute tests in Amper):
+To run tests separately (build alone does not execute tests in Kotlin Toolchain):
 
 ```bash
-./amper test
+./kotlin test
 ```
 
 To produce a runnable JAR:
 
 ```bash
-./amper package
+./kotlin package
 ```
 
 Output: `build/tasks/_app_executableJarJvm/app-jvm-executable.jar`
@@ -117,21 +117,21 @@ Test configuration is in `app/src/test/resources/application-test.yml`.
 To run all tests:
 
 ```bash
-./amper test
+./kotlin test
 ```
 
 To run tests in a specific module:
 
 ```bash
-./amper test -m app
-./amper test -m package
+./kotlin test -m app
+./kotlin test -m package
 # etc.
 ```
 
 To run a specific test:
 
 ```bash
-./amper test --include-test=io.klibs.app.example.SimpleExampleTest
+./kotlin test --include-test=io.klibs.app.example.SimpleExampleTest
 ```
 
 ### Types of Tests
