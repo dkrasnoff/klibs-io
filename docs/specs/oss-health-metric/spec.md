@@ -15,7 +15,7 @@ Compute a single, research-backed **OSS Health** score (0–100) per project fro
 ### Scenario 1 — Actively maintained repo gets a health score (P1)
 - **Given:** a non-archived GitHub repository with regular commits, issues, and merged PRs over the last 12 weeks.
 - **When:** the OSS Health computation runs for that repository.
-- **Then:** a numeric score in `[0,100]` is computed and persisted with status `COMPUTED`, and the value is returned in the project's search-result payload and project-details payload.
+- **Then:** a numeric score in `[0,100]` is computed and persisted with status `COMPUTED`; because it is `>= 40` it is returned as a numeric value in the project's search-result payload and project-details payload.
 - **Independent test:** seed an `scm_repo` + `project` and a fixture of activity inputs; run the computation; assert via JPA/HQL that a health row exists with status `COMPUTED` and the score matches the formula (§8) for those inputs.
 
 ### Scenario 2 — Archived / disabled repo is skipped (P1)
@@ -25,15 +25,15 @@ Compute a single, research-backed **OSS Health** score (0–100) per project fro
 - **Independent test:** mark the repo archived in the GraphQL fixture; run the computation; assert via HQL the status is `SKIPPED` and the API response field is null.
 
 ### Scenario 3 — Low-activity repo is computed but flagged insufficient (P2)
-- **Given:** a repository with activity below the display threshold (computed score `< 40`, or too little data to compute a meaningful score, e.g. fewer than `[NEEDS CLARIFICATION: minimum weeks of history / minimum commit count to consider data sufficient]`).
+- **Given:** a repository that is either computed but below the display threshold (score `< 40` — including quiet repos whose zero-denominator dimensions scored 0), or too new to score because it lacks a full 12-week window (`INSUFFICIENT_DATA`, per §8).
 - **When:** the computation runs.
-- **Then:** the API distinguishes three states for the consumer — *not yet computed*, *computed but below the display threshold / insufficient data*, and *computed and displayable* — so the frontend can render "Insufficient activity data" without confusing it with a genuine score of 0.
-- **Independent test:** seed sparse activity; assert the response carries a status/flag distinguishing "insufficient" from a real low score and from "not yet computed".
+- **Then:** the API exposes only the **"insufficient"** indicator for this repo — no numeric score — so the frontend renders "Insufficient activity data"; the raw sub-40 value is never sent.
+- **Independent test:** seed sparse activity (resulting score `< 40`, or a repo younger than 12 weeks); assert the response carries the "insufficient" indicator and **no** numeric `ossHealth` value.
 
 ### Edge cases
-- **Zero commits in the 12-week window** → coefficient of variation is undefined (mean = 0). Treated as insufficient data, not score 0.
-- **Zero issues opened in the window** → issue close ratio `closed/opened` is undefined; the issue dimension contribution must be defined for this case (see §8).
-- **Zero PRs in the window** → same for the PR dimension.
+- **Zero commits in the 12-week window** → CV undefined (mean = 0) → `C = 0` and `A = 0`; the repo is still scored (composite reflects any issue/PR activity).
+- **Zero issues opened in the window** → issue close ratio `closed/opened` undefined → `I = 0`; the repo is still scored, per §8.
+- **Zero PRs opened in the window** → PR merge ratio undefined → `P = 0`; the repo is still scored, per §8.
 - **Single contributor** → top-contributor commit share = 1, so the diversity sub-term contribution is 0; this is a valid low (not an error).
 - **Repository younger than the 12-week window** → partial window; treated as insufficient data.
 - **GraphQL call fails / times out for a repo** → the previously persisted score (if any) is retained, the repo is backed off and retried later; one failure does not zero out the score.
@@ -41,18 +41,18 @@ Compute a single, research-backed **OSS Health** score (0–100) per project fro
 
 ## 4. Functional requirements
 
-- **FR-001:** System MUST expose an `ossHealth` field on the **project search-results payload** and on the **project-details payload**, carrying the computed OSS Health score as an integer in `[0,100]`.
-- **FR-002:** The API MUST distinguish "not yet computed" from a computed score, and MUST NOT report a computed score of `0` as equivalent to "no data". (A consumer reading the response can tell the difference.)
-- **FR-003:** System MUST NOT compute or report an OSS Health score for an archived or disabled repository; `ossHealth` for such a project MUST be null/absent rather than `0`.
+- **FR-001:** System MUST expose an `ossHealth` field on the **project search-results payload** and on the **project-details payload**, carrying the OSS Health score as an integer when displayable (see FR-002/FR-005).
+- **FR-002:** The `ossHealth` field MUST communicate exactly one of three consumer-visible states: a **numeric score** (`>= 40`), an **"insufficient"** indicator, or **absent/null** (nothing to show). All three MUST be distinguishable by the consumer. (The exact JSON encoding is a plan-level detail; the contract is that the three states are distinguishable.)
+- **FR-003:** System MUST NOT compute or report an OSS Health score for an archived or disabled repository; `ossHealth` for such a project MUST be the **absent/null** state of FR-002 — never `0` and never the "insufficient" indicator.
 - **FR-004:** The OSS Health score MUST be computed according to the formula and input windows defined in §8 (Decision — OSS Health formula). Given a fixed set of activity inputs, the resulting score MUST be deterministic and reproducible.
-- **FR-005:** The API MUST allow the consumer to distinguish a *displayable* score from a *below-threshold / insufficient-data* score, so the frontend can apply the product display rule (hide / show "Insufficient activity data") without inventing its own cutoff. `[NEEDS CLARIFICATION: does the backend gate display at score < 40 by returning a status, or return the raw score plus an "insufficient" flag and let the frontend apply the 40 cutoff?]`
+- **FR-005:** The backend MUST apply the display cutoff itself: when a computed score is `< 40`, or the repository is too new to score (`INSUFFICIENT_DATA`), the API MUST expose only the **"insufficient"** indicator and MUST NOT include the raw numeric value. The numeric `ossHealth` value MUST be present **only** when the score is `>= 40`. The frontend never receives a sub-40 number and applies no cutoff of its own.
 - **FR-006:** OSS Health scores MUST be refreshed over time so the value reflects recent activity; a stale score MUST eventually be recomputed without manual intervention.
 
 ## 5. Non-functional requirements
 
-- **External rate limits — GitHub GraphQL:** The GitHub GraphQL API is metered by a **point budget of 5000 points/hour per authenticated token** (point-based, *not* per-IP). klibs.io uses a single personal access token (`klibs.integration.github.personal-access-token`), so this budget is shared across all replicas and across the existing REST jobs that use the same token — independent of the shared Cloud NAT egress IPs. The OSS Health job MUST stay within this budget alongside existing GitHub traffic.
+- **External rate limits — GitHub GraphQL:** The GitHub GraphQL API is metered by a **point budget of 5000 points/hour per authenticated token** (point-based, *not* per-IP). klibs.io uses a single personal access token (`klibs.integration.github.personal-access-token`), so this budget is shared across all replicas — independent of the shared Cloud NAT egress IPs. GraphQL's point budget is **separate** from the REST request budget the existing kohsuke jobs consume, so this job does not eat into their allowance. At the weekly cadence (~3800 repos → ~24 repos/hour), even at tens of GraphQL points per repo the job uses a small fraction of the 5000 pts/hour budget.
 - **Concurrency / scheduling:** Computation MUST be spread across time — **one repository per scheduled tick** — rather than processing all repositories in a single heavy batch. The job MUST hold a distinct ShedLock lock so only one instance runs at a time. Per-repo failures MUST back off and retry (reuse the existing backoff pattern) without blocking other repos.
-- **Performance / staleness:** Each repository's score should be refreshed on roughly a **weekly** cadence. With one repo per tick, the tick interval is derived from the repository count and the target refresh window. `[NEEDS CLARIFICATION: current count of active (non-archived) repositories and the acceptable maximum staleness, to size the tick interval]`
+- **Performance / staleness:** ~**3800** repositories. Target a **weekly** full-corpus refresh. At one repo per tick, a complete weekly sweep needs a tick every `604800 s / 3800 ≈ 160 s` — i.e. **one repo every ~2.5–3 minutes** sweeps the whole corpus in ~7–8 days. The tick interval is a configurable `klibs.*` property defaulting to that range. No tighter staleness target is known; weekly is adequate because the inputs are 12-week aggregates that move slowly. Revisit if the repo count grows materially.
 - **Observability:** Add a Micrometer counter/timer for OSS Health computations (success / skipped / failed) and a gauge for the count of repos pending (re)computation, consistent with the existing GitHub-integration metrics.
 
 ## 6. Out of scope
@@ -77,7 +77,7 @@ Compute a single, research-backed **OSS Health** score (0–100) per project fro
 - **Search / materialized views:** `project_index` must be recreated to add the `ossHealth` column (join `project → scm_repo → oss health`), following the existing recreate-view-with-new-column migration pattern (e.g. the `dependent_count` recreation). `package_index` unaffected.
 - **External integrations:** GitHub **GraphQL** (`https://api.github.com/graphql`) for commit history (weekly buckets + per-author counts), issues (created/closed timestamps), and PRs (created/merged timestamps). Existing REST `/stats/participation` and `/stats/contributors` are intentionally **not** used (they return 202 while GitHub computes stats asynchronously, which is unreliable for an on-demand job). Per-repo backoff/retry.
 - **Scheduled jobs:** New `@Scheduled` job in `app`, one repository per tick, distinct `@SchedulerLock` name (e.g. `updateOssHealthLock`), selecting the stalest health record (analogous to `findMultipleForUpdate`). Idempotent: recomputing yields the same score for the same inputs.
-- **Configuration:** New `klibs.*` properties for the job cadence and (optionally) the display threshold; default the job **on** but make it disableable via a property toggle (so it can be suppressed in tests/environments). No profile gating.
+- **Configuration:** New `klibs.*` properties: the job tick interval (default ~2.5–3 min, sized for a weekly sweep of ~3800 repos), the display threshold (default `40`), and an on/off toggle (default **on**, overridable to suppress the job in tests/environments). No profile gating.
 - **API surface:** Additive field `ossHealth` on the search-results and project-details responses; update OpenAPI docs. Additive only — not a breaking change.
 - **Frontend contract:** `klibs-frontend` will need to read `ossHealth` and the displayable/insufficient state, and render "Insufficient activity data" below the threshold. Out of scope here but the contract (FR-001, FR-005) is the dependency.
 
@@ -93,7 +93,7 @@ Compute a single, research-backed **OSS Health** score (0–100) per project fro
   #   CV = stddev / mean of the 12 weekly commit counts   (population CV; RFC's "mean/std" is a typo)
   C = max(0, 1 - CV / 0.6)
 
-  # I — Issue responsiveness (window: see clarification below)
+  # I — Issue responsiveness (12-week window)
   IssueCloseRatio   = issuesClosedInWindow / issuesOpenedInWindow
   MedianIssueCloseDays = median close time of issues closed in window
   I = 0.5 * min(1, IssueCloseRatio / 0.4)
@@ -110,6 +110,12 @@ Compute a single, research-backed **OSS Health** score (0–100) per project fro
   TopContributorCommitShare = top author's commits / total commits in window
   A = 0.6 * min(1, ActiveContributors / 5)
     + 0.4 * (1 - TopContributorCommitShare)
+
+  # Zero-denominator handling (all over the 12-week window):
+  #   issuesOpenedInWindow == 0  -> I = 0
+  #   prsOpenedInWindow    == 0  -> P = 0
+  #   commitsInWindow      == 0  -> C = 0 and A = 0   (CV undefined)
+  #   repo younger than 12 weeks -> not scored; status = INSUFFICIENT_DATA
   ```
 - **Why:** The paper's bell-shaped normalization would penalise very active projects (e.g. a high commit rate scores *lower*), which is counter-intuitive and demoralising for an author-facing signal — contrary to the RFC anti-goal "don't make authors feel bad". Monotonic-capped terms are easier to explain and defend. Weights `[0.30, 0.25, 0.25, 0.20]` are taken unchanged from the paper. Using a composite (rather than any single raw metric) is itself supported by arXiv 2309.12120, which finds single context-free indicators insufficient for sustainability judgments.
 - **Rejected:**
@@ -117,7 +123,9 @@ Compute a single, research-backed **OSS Health** score (0–100) per project fro
   - *Repository-centrality / network-lifespan model* (arXiv 2405.07508) — requires building a cross-repo user–repository graph; far too much computation for klibs.io's per-repo budget.
   - *Single raw metric* (stars / last-commit / issue count alone) — rejected on the evidence of arXiv 2309.12120.
 - **Revisit if:** authors report the score feels unfair, or the chosen target constants (0.6, 0.4, 21d, 0.5, 14d, 5, etc.) produce poorly-distributed scores on real data — these constants should be validated against a sample of indexed repos before launch.
-- **Open:** `[NEEDS CLARIFICATION: the window for issue/PR opened/closed ratios and medians — the commit terms use 12 weeks; do the issue/PR ratios use the same 12 weeks, the RFC's per-day deltas, or a longer window such as 90 days?]` and the zero-denominator handling: `[NEEDS CLARIFICATION: when issuesOpenedInWindow == 0 (or prsOpenedInWindow == 0), is that dimension scored 0, omitted with weights renormalised, or treated as insufficient data?]`
+- **Resolved — window:** a single **12-week** window applies to all four dimensions (commit, issue, PR, author).
+- **Resolved — zero denominators:** an undefined sub-term caused by a zero denominator contributes **0** to its dimension; the repository is still `COMPUTED`. Specifically: `issuesOpenedInWindow == 0` → `I = 0`; `prsOpenedInWindow == 0` → `P = 0`; `commitsInWindow == 0` (CV undefined) → `C = 0` **and** `A = 0`. **Consequence:** a stable / "finished" library with little or no recent activity earns a genuine *low* composite score, which the `< 40` display gate (FR-005) then renders as "Insufficient activity data" — matching the RFC's display rule, rather than a separate status.
+- **Resolved — `INSUFFICIENT_DATA` status:** reserved for repositories too new to have a full 12-week window; these are not scored. (Archived/disabled repos → `SKIPPED`; a repo with no row yet → "not computed".)
 
 ### Decision — Compute all inputs from GitHub GraphQL, not REST stats or daily snapshots
 - **Choice:** Fetch every input via the GitHub GraphQL API: commit history over 12 weeks (yields both weekly buckets for C *and* per-author commit counts for A in one traversal), `issues` with `createdAt`/`closedAt`, and `pullRequests` with `createdAt`/`mergedAt`. Read `isArchived`/`isDisabled` from the same GraphQL repository query to drive the skip decision.
@@ -136,17 +144,25 @@ Compute a single, research-backed **OSS Health** score (0–100) per project fro
 - **Rejected:** Raw JDBC (`ScmRepositoryRepositoryJdbc` style) — matches the module's existing pattern but the user explicitly preferred JPA/HQL here; storing only the composite score (no sub-scores) — loses explainability and makes the formula untestable component-by-component.
 - **Tension to confirm:** CLAUDE.md says "match the existing persistence pattern in the touched module" (JDBC). Using JPA here is a deliberate, user-requested divergence — flag for reviewer.
 
+### Decision — Apply the `< 40` display gate at the response-mapping layer
+- **Choice:** Persist (and store in `project_index`) the **raw** computed score in `[0,100]`; apply the `< 40` cutoff when building the response DTOs — below threshold, emit the "insufficient" indicator and omit the number. The threshold is a config property (`klibs.*`, default `40`).
+- **Why:** Keeps the raw score available for debugging, metrics, and threshold tuning without re-running the materialized view; the cutoff is a presentation rule that can change without a migration. Satisfies FR-005 (the raw sub-40 value never crosses the API boundary).
+- **Rejected:** Storing the already-gated value in the view/DB — would bake the threshold into a migration and lose the raw score for analysis.
+
 ### Decision — Rolling one-repo-per-tick scheduled job with backoff
 - **Choice:** A new `@Scheduled` job that picks the single stalest health record each tick, computes its score, persists it, and applies the existing exponential backoff on failure. Distinct ShedLock lock `updateOssHealthLock`.
 - **Why:** Mirrors the proven `GitHubRepositoryUpdatingJob` pattern (`findMultipleForUpdate` + `BackoffProvider`), spreads GraphQL point usage smoothly across the hour/week (user-requested), and keeps the heavy work off any single tick.
-- **Rejected:** One heavy weekly batch over all repos — spikes the GraphQL budget and risks long lock-holds / partial failures.
+- **Rejected:**
+  - *One heavy weekly batch over all repos* — spikes the GraphQL budget and risks long lock-holds / partial failures.
+  - *Folding the computation into the existing `GitHubRepositoryUpdatingJob`* — that job runs every 30s, processes 3 repos/tick, hits cheap REST (kohsuke), and refreshes repo metadata far more often than health needs. Reusing its cadence would massively overshoot both the ~weekly health cadence and the 5000 pts/hr GraphQL budget; suppressing that with an inline "is health stale?" gate would couple two concerns with different selection orderings (stalest *metadata* row ≠ stalest *health* row), different rate-limit budgets (REST token vs GraphQL points), and different failure modes (a GraphQL secondary-limit shouldn't back off cheap metadata refresh, and vice versa). A separate job keeps failure isolation and budgeting clean and matches the existing one-job-per-concern layout (owner-update job, materialized-view job).
+- **Revisit if:** the health computation turns out to need only a cheap, single call per repo after all — then piggybacking on the existing visit becomes attractive.
 
 ## 9. Key entities
 
 - **`OssHealthEntity`** (working name): one row per `scm_repo`.
   - **Key fields:** `scmRepoId` (FK / identity to `scm_repo`), `score` (0–100, nullable when not displayable), `commitConsistency`, `issueResponsiveness`, `prManagement`, `authorDiversity` (the four component sub-scores in `[0,1]`), `status` (`COMPUTED` / `INSUFFICIENT_DATA` / `SKIPPED`), `computedAt` (Instant; JVMs run UTC, map Instant ↔ TIMESTAMP accordingly).
   - **Relationships:** one-to-one with `ScmRepositoryEntity`; surfaced per `project` via `project.scm_repo_id`.
-  - **Lifecycle:** created/updated by the rolling job; absence of a row = "not yet computed"; `SKIPPED` for archived/disabled repos; recomputed on the weekly cadence.
+  - **Lifecycle:** created/updated by the rolling job; absence of a row = "not yet computed"; `SKIPPED` for archived/disabled repos; `INSUFFICIENT_DATA` for repos too new for a full 12-week window; `COMPUTED` otherwise (zero-denominator dimensions score 0); recomputed on the weekly cadence.
 
 ## 10. Database schema diagram
 
@@ -161,7 +177,7 @@ erDiagram
         string license_name
     }
     OSS_HEALTH {
-        int scm_repo_id PK_FK "(new)"
+        int scm_repo_id PK,FK "(new)"
         int score "(new) nullable"
         float commit_consistency "(new)"
         float issue_responsiveness "(new)"
@@ -190,7 +206,7 @@ erDiagram
 - The single existing GitHub PAT has GraphQL access and sufficient point budget to add a weekly-per-repo health pass on top of current REST traffic.
 - The RFC's chosen simplified formula (and its weights/constants) is the intended contract; the paper-exact CSI is reference only.
 - "Spread across time, one repo per period" maps onto the existing one-repo-per-tick scheduled-job pattern (`@Scheduled` + ShedLock + backoff), not a new infrastructure mechanism.
-- The 12-week window applies to the commit-derived dimensions (C, A); the issue/PR window is to be confirmed (see §8).
+- A single 12-week window applies to all four dimensions.
 
 ## 13. References
 
