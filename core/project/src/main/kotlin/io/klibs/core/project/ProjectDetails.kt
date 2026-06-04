@@ -36,8 +36,12 @@ data class ProjectDetails(
     val lastActivityAt: Instant,
     val updatedAt: Instant,
 
+    val dependentCount: Int,
+
     val tags: List<String>,
     val markers: List<MarkerType>,
+
+    val ossHealthScore: Int?,
 ) {
     private val isAndroidx: Boolean get() = ownerLogin == ANDROIDX_OWNER
 

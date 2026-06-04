@@ -28,7 +28,8 @@ class ProjectSearchRepositoryJdbc(
                    latest_version_ts,
                    array_to_string(platforms, ',') AS platforms,
                    plain_description,
-                   tags
+                   tags,
+                   dependent_count
             FROM project_index
             WHERE stars BETWEEN :minStars AND :maxStars
             ORDER BY random()
@@ -64,7 +65,8 @@ class ProjectSearchRepositoryJdbc(
                    latest_version_ts,
                    array_to_string(platforms, ',') AS platforms,
                    plain_description,
-                   tags
+                   tags,
+                   dependent_count
             FROM project_index
             WHERE project_id IN (SELECT id FROM matching_project_ids)
             ORDER BY random()
@@ -98,6 +100,8 @@ class ProjectSearchRepositoryJdbc(
         val offset = limit * (page - 1)
         val orderBy = when {
             sortBy == SearchSort.RELEVANCY && isQueryPresent -> "weighted_rank DESC, project_id ASC"
+            sortBy == SearchSort.MOST_DEPENDENTS -> "dependent_count DESC, project_id ASC"
+            sortBy == SearchSort.MOST_HEALTHY -> "health_score DESC NULLS LAST, project_id ASC"
             sortBy == SearchSort.MOST_STARS -> "stars DESC, project_id ASC"
             else -> "stars DESC, project_id ASC"
         }
@@ -114,7 +118,7 @@ class ProjectSearchRepositoryJdbc(
 
         val sql = buildString {
             append("SELECT project_id, owner_type, owner_login, repo_name, name, stars, license_name, latest_version")
-            append(", latest_version_ts, array_to_string(platforms, ',') AS platforms, plain_description, tags, markers")
+            append(", latest_version_ts, array_to_string(platforms, ',') AS platforms, plain_description, tags, markers, dependent_count, health_score")
 
             // For debugging and testing purposes
             append(", targets_vector")
@@ -273,7 +277,7 @@ class ProjectSearchRepositoryJdbc(
                    pi.project_id, pi.owner_type, pi.owner_login, pi.repo_name, pi.name,
                    pi.stars, pi.license_name, pi.latest_version, pi.latest_version_ts,
                    array_to_string(pi.platforms, ',') AS platforms,
-                   pi.plain_description, pi.tags, pi.markers, pi.targets_vector
+                   pi.plain_description, pi.tags, pi.markers, pi.targets_vector, pi.dependent_count, pi.health_score
             FROM category c
             LEFT JOIN LATERAL (
                 SELECT * FROM project_index
@@ -331,7 +335,9 @@ class ProjectSearchRepositoryJdbc(
                     },
                 markers = rs.getArray("markers")?.array?.let { it as? Array<*> }?.map { it.toString() } ?: emptyList(),
                 targets = rs.getString("targets_vector")?.split(" ")?.map { it.trim('\'') } ?: emptyList(),
-                tags = rs.getArray("tags")?.array?.let { it as? Array<*> }?.map { it.toString() } ?: emptyList()
+                tags = rs.getArray("tags")?.array?.let { it as? Array<*> }?.map { it.toString() } ?: emptyList(),
+                dependentCount = rs.getInt("dependent_count"),
+                ossHealthScore = rs.getObject("health_score") as Int?,
             )
         }
     }

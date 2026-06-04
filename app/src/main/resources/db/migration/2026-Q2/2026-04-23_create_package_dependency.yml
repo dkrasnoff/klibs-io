@@ -1,0 +1,49 @@
+databaseChangeLog:
+  - changeSet:
+      id: create package_dependency table
+      author: nikita.vlaev@jetbrains.com
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            tableExists:
+              tableName: package_dependency
+      changes:
+        - createTable:
+            tableName: package_dependency
+            columns:
+              - column:
+                  name: package_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    references: package(id)
+                    foreignKeyName: fk_package_dependency_package_id
+                    deleteCascade: true
+              - column:
+                  name: dep_maven_artifact_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    references: maven_artifact(id)
+                    foreignKeyName: fk_package_dependency_dep_maven_artifact_id
+        - addPrimaryKey:
+            tableName: package_dependency
+            columnNames: package_id, dep_maven_artifact_id
+            constraintName: pk_package_dependency
+
+  - changeSet:
+      id: add reverse lookup index on package_dependency
+      author: nikita.vlaev@jetbrains.com
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            indexExists:
+              tableName: package_dependency
+              indexName: idx_package_dependency_dep_maven_artifact_id
+      changes:
+        - createIndex:
+            tableName: package_dependency
+            indexName: idx_package_dependency_dep_maven_artifact_id
+            columns:
+              - column:
+                  name: dep_maven_artifact_id

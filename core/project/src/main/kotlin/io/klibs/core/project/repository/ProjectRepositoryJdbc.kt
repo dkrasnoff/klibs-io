@@ -33,6 +33,7 @@ class ProjectRepositoryJdbc(
             .addValue("minimized_readme", projectEntity.minimizedReadme)
             .addValue("latest_version", projectEntity.latestVersion)
             .addValue("latest_version_ts", Timestamp.from(projectEntity.latestVersionTs))
+            .addValue("dependent_count", projectEntity.dependentCount)
 
         val id = projectInsert.executeAndReturnKey(params).toInt()
         return projectEntity.copy(id = id)
@@ -138,7 +139,8 @@ class ProjectRepositoryJdbc(
                    description,
                    minimized_readme,
                    latest_version,
-                   latest_version_ts
+                   latest_version_ts,
+                   dependent_count
             FROM project
             WHERE id = :id
         """.trimIndent()
@@ -159,7 +161,8 @@ class ProjectRepositoryJdbc(
                    description,
                    minimized_readme,
                    latest_version,
-                   latest_version_ts
+                   latest_version_ts,
+                   dependent_count
             FROM project
             WHERE scm_repo_id = :scmRepoId
         """.trimIndent()
@@ -180,7 +183,8 @@ class ProjectRepositoryJdbc(
                    project.description,
                    project.minimized_readme,
                    project.latest_version,
-                   project.latest_version_ts
+                   project.latest_version_ts,
+                   project.dependent_count
             FROM project
             WHERE project.minimized_readme IS NOT NULL
               AND project.description IS NULL
@@ -203,7 +207,8 @@ class ProjectRepositoryJdbc(
                    project.description,
                    project.minimized_readme,
                    project.latest_version,
-                   project.latest_version_ts
+                   project.latest_version_ts,
+                   project.dependent_count
             FROM project
             WHERE project.minimized_readme IS NOT NULL
               AND NOT EXISTS (
@@ -248,7 +253,8 @@ class ProjectRepositoryJdbc(
                    project.description,
                    project.minimized_readme,
                    project.latest_version,
-                   project.latest_version_ts
+                   project.latest_version_ts,
+                   project.dependent_count
             FROM project
             JOIN scm_owner ON project.owner_id = scm_owner.id
             WHERE project.name = :name
@@ -278,7 +284,8 @@ class ProjectRepositoryJdbc(
                project.description,
                project.minimized_readme,
                project.latest_version,
-               project.latest_version_ts
+               project.latest_version_ts,
+               project.dependent_count
         FROM project
         JOIN scm_owner ON project.owner_id = scm_owner.id
         WHERE $conditions
@@ -305,7 +312,8 @@ class ProjectRepositoryJdbc(
                    description,
                    minimized_readme,
                    latest_version,
-                   latest_version_ts
+                   latest_version_ts,
+                   dependent_count
             FROM project
             WHERE scm_repo_id = :scmRepoId
               AND name = :name
@@ -335,6 +343,28 @@ class ProjectRepositoryJdbc(
             }
             .optional()
             .getOrNull()
+    }
+
+    override fun recomputeAllDependentCounts() {
+        val sql = """
+            WITH dependent_counts AS (
+                SELECT producer.project_id,
+                       COUNT(DISTINCT consumer.project_id)::int AS dependent_count
+                FROM package_dependency pd
+                JOIN package producer ON pd.dep_maven_artifact_id = producer.maven_artifact_id
+                JOIN package consumer ON consumer.id = pd.package_id
+                WHERE consumer.project_id IS DISTINCT FROM producer.project_id
+                GROUP BY producer.project_id
+            )
+            
+            UPDATE project p
+            SET dependent_count = COALESCE(dc.dependent_count, 0)
+            FROM project pd 
+            LEFT JOIN dependent_counts dc ON dc.project_id = pd.id
+            WHERE p.id = pd.id AND p.dependent_count IS DISTINCT FROM COALESCE(dc.dependent_count, 0)
+        """.trimIndent()
+
+        jdbcClient.sql(sql).update()
     }
 
     override fun findAllForSitemap(): List<SitemapProjectEntry> {
@@ -368,6 +398,7 @@ class ProjectRepositoryJdbc(
                 minimizedReadme = rs.getString("minimized_readme"),
                 latestVersion = rs.getString("latest_version"),
                 latestVersionTs = rs.getTimestamp("latest_version_ts").toInstant(),
+                dependentCount = rs.getInt("dependent_count"),
             )
         }
     }

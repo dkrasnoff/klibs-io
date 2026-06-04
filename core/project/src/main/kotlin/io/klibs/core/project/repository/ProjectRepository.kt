@@ -41,4 +41,10 @@ interface ProjectRepository {
     fun findPlatformsById(projectId: Int): List<PackagePlatform>?
 
     fun findAllForSitemap(): List<SitemapProjectEntry>
+
+    /**
+     * Full recompute of `project.dependent_count` for every project in the DB. Used by the
+     * scheduled refresh job.
+     */
+    fun recomputeAllDependentCounts()
 }

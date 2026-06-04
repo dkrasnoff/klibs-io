@@ -66,7 +66,8 @@ klibs:
         rate-limit-refill-period-sec: ${KLIBS_MAVEN_RATE_LIMIT_REFILL_PERIOD:5}
         index-endpoint: ${KLIBS_MAVEN_INDEX_ENDPOINT:https://repo1.maven.org/maven2}
         index-dir: ${KLIBS_MAVEN_INDEX_CACHE_DIR:${user.dir}/cache/maven-index}
-        content-endpoint: ${KLIBS_MAVEN_CONTENT_ENDPOINT:https://cache-redirector.jetbrains.com/repo1.maven.org/maven2/}
+        content-endpoint: ${KLIBS_MAVEN_CONTENT_ENDPOINT:https://repo1.maven.org/maven2/}
+        content-fallback-endpoint: ${KLIBS_MAVEN_CONTENT_FALLBACK_ENDPOINT:https://search.maven.org/remotecontent?filepath=}
     github:
       personal-access-token: ${KLIBS_GITHUB_TOKEN}
       cache:
@@ -74,6 +75,11 @@ klibs:
         request-cache-size-mb: ${KLIBS_CACHE_DIR_REQUEST_SIZE_MB:10}
       update-repos-per-iteration: ${KLIBS_UPDATE_GITHUB_REPOS_PER_ITERATION:3}
   indexing: ${KLIBS_ENABLE_INDEXING:false}
+  scheduling:
+    process-indexing-queue:
+      enabled: ${PROCESS_INDEXING_QUEUE_ENABLED:true}
+    fill-version-type:
+      enabled: ${FILL_VERSION_TYPE_ENABLED:true}
   indexing-configuration:
     executor:
       thread-count: 2
@@ -85,6 +91,11 @@ klibs:
         bucket-name: ${BUCKET_NAME}
         prefix: ${KLIBS_GMAVEN_S3_PREFIX:gmaven}
   ai: true
+  oss-health:
+    commit-cv-denominator: 3.0
+    issue-median-days-threshold: 21.0
+    pr-median-days-threshold: 10.0
+    active-contributors-target: 5
 
 management:
   endpoints:

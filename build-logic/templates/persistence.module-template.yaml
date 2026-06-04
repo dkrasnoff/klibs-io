@@ -15,3 +15,8 @@ test-dependencies:
   - $libs.testcontainers.postgresql
   - $libs.testcontainers.jdbc
   - $libs.testcontainers.database.commons
+
+settings:
+  kotlin:
+    freeCompilerArgs:
+      - -Xjvm-default=all

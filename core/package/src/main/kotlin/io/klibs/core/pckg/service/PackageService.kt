@@ -1,9 +1,11 @@
 package io.klibs.core.pckg.service
 
-import io.klibs.core.pckg.entity.PackageEntity
-import io.klibs.core.pckg.entity.PackageTargetEntity
+import io.klibs.core.pckg.dto.MavenArtifactDTO
 import io.klibs.core.pckg.dto.PackageDTO
+import io.klibs.core.pckg.entity.PackageEntity
 import io.klibs.core.pckg.entity.PackageIndexEntity
+import io.klibs.core.pckg.entity.PackageTargetEntity
+import io.klibs.core.pckg.enums.VersionType
 import io.klibs.core.pckg.model.PackageDetails
 import io.klibs.core.pckg.model.PackageDeveloper
 import io.klibs.core.pckg.model.PackageLicense
@@ -12,15 +14,22 @@ import io.klibs.core.pckg.model.PackageTarget
 import io.klibs.core.pckg.repository.PackageIndexRepository
 import io.klibs.core.pckg.dto.projection.SitemapPackageView
 import io.klibs.core.pckg.repository.PackageRepository
+import org.slf4j.LoggerFactory
+import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Service
+import org.springframework.beans.factory.ObjectProvider
+import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 
 @Service
 @Transactional(readOnly = true)
 class PackageService(
     private val packageRepository: PackageRepository,
-    private val packageIndexRepository: PackageIndexRepository
+    private val packageIndexRepository: PackageIndexRepository,
+    private val selfProvider: ObjectProvider<PackageService>
 ) {
+    private val logger = LoggerFactory.getLogger(PackageService::class.java)
+
     @Transactional(readOnly = false)
     fun updateByCoordinates(packageDTO: PackageDTO): PackageDTO? {
         val existingPackage = packageRepository.findByGroupIdAndArtifactIdAndVersion(
@@ -29,7 +38,8 @@ class PackageService(
             packageDTO.version
         ) ?: return null
 
-        val updatedPackage = packageDTO.toEntity().deepCopy(id = existingPackage.id)
+        val updatedPackage = packageDTO.toEntity(MavenArtifactDTO.fromEntity(existingPackage.mavenArtifact))
+            .deepCopy(id = existingPackage.id)
 
         val existingTargetsByKey = existingPackage.targets.associateBy { it.platform to it.target }
 
@@ -72,6 +82,28 @@ class PackageService(
 
     fun findAllPackagesForSitemap(): List<SitemapPackageView> =
         packageRepository.findAllPackagesForSitemap()
+
+    fun fillAllNullVersionTypes(batchSize: Int = 1000): Int {
+        var totalUpdated = 0
+        while (true) {
+            val updated = selfProvider.getObject().fillNullVersionTypes(batchSize)
+            totalUpdated += updated
+            if (updated < batchSize) return totalUpdated
+            logger.info("Updated $totalUpdated packages' version_type so far.")
+        }
+    }
+
+    @Transactional(readOnly = false, propagation = Propagation.REQUIRES_NEW)
+    fun fillNullVersionTypes(batchSize: Int): Int {
+        val batch = packageRepository.findByVersionTypeIsNull(PageRequest.ofSize(batchSize))
+        if (batch.isEmpty()) return 0
+
+        val updated = batch.map { pkg ->
+            pkg.deepCopy(versionType = VersionType.from(pkg.version))
+        }
+        packageRepository.saveAll(updated)
+        return updated.size
+    }
 
     fun getKotlinVersionsByProjectIds(projectIds: List<Int>): Map<Int, String?> {
         if (projectIds.isEmpty()) return emptyMap()

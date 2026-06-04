@@ -1,0 +1,184 @@
+databaseChangeLog:
+  - changeSet:
+      id: create scm_repo_issue_or_pr table
+      author: nikita.vlaev@jetbrains.com
+      comment: "KTL-4386: Sliding-window store of closed issues and merged PRs for OSS Health index."
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            tableExists:
+              tableName: scm_repo_issue_or_pr
+      changes:
+        - createTable:
+            tableName: scm_repo_issue_or_pr
+            columns:
+              - column:
+                  name: id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    primaryKey: true
+                    primaryKeyName: pk_scm_repo_issue_or_pr
+              - column:
+                  name: scm_repo_id
+                  type: INT
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_scm_repo_issue_or_pr_scm_repo_id
+                    references: scm_repo(id)
+              - column:
+                  name: gh_number
+                  type: INT
+                  remarks: "GitHub's per-repo issue/PR number (the integer in /issues/N URLs); together with scm_repo_id, this is the upsert dedup key."
+                  constraints:
+                    nullable: false
+              - column:
+                  name: type
+                  type: VARCHAR(8)
+                  remarks: "ISSUE or PR. Aggregate queries filter by this since I and P sub-scores are computed separately."
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: closed_at
+                  type: TIMESTAMP
+              - column:
+                  name: merged_at
+                  type: TIMESTAMP
+              - column:
+                  name: duration_days
+                  type: INT
+        - addUniqueConstraint:
+            tableName: scm_repo_issue_or_pr
+            columnNames: scm_repo_id, gh_number
+            constraintName: uq_scm_repo_issue_or_pr_repo_number
+
+  - changeSet:
+      id: create scm_repo_issue_or_pr sequence
+      author: nikita.vlaev@jetbrains.com
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            sequenceExists:
+              sequenceName: scm_repo_issue_or_pr_id_seq
+      changes:
+        - sql:
+            sql: |
+              CREATE SEQUENCE scm_repo_issue_or_pr_id_seq
+                  AS BIGINT
+                  INCREMENT BY 50
+                  START WITH 1;
+
+  - changeSet:
+      id: index scm_repo_issue_or_pr on repo/type/closed
+      author: nikita.vlaev@jetbrains.com
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            indexExists:
+              tableName: scm_repo_issue_or_pr
+              indexName: scm_repo_issue_or_pr_repo_type_closed_idx
+      changes:
+        - createIndex:
+            indexName: scm_repo_issue_or_pr_repo_type_closed_idx
+            tableName: scm_repo_issue_or_pr
+            columns:
+              - column:
+                  name: scm_repo_id
+              - column:
+                  name: type
+              - column:
+                  name: closed_at
+
+  - changeSet:
+      id: index scm_repo_issue_or_pr on repo/type/created
+      author: nikita.vlaev@jetbrains.com
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            indexExists:
+              tableName: scm_repo_issue_or_pr
+              indexName: scm_repo_issue_or_pr_repo_type_created_idx
+      changes:
+        - createIndex:
+            indexName: scm_repo_issue_or_pr_repo_type_created_idx
+            tableName: scm_repo_issue_or_pr
+            columns:
+              - column:
+                  name: scm_repo_id
+              - column:
+                  name: type
+              - column:
+                  name: created_at
+
+  - changeSet:
+      id: create scm_repo_health_components table
+      author: nikita.vlaev@jetbrains.com
+      comment: "KTL-4386: Per-repo OSS Health components snapshot (one row per repo, overwritten each run)."
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            tableExists:
+              tableName: scm_repo_health_components
+      changes:
+        - createTable:
+            tableName: scm_repo_health_components
+            columns:
+              - column:
+                  name: scm_repo_id
+                  type: INT
+                  constraints:
+                    nullable: false
+                    primaryKey: true
+                    foreignKeyName: fk_scm_repo_health_components_scm_repo_id
+                    references: scm_repo(id)
+              - column:
+                  name: score_recomputed_ts
+                  type: TIMESTAMP
+              - column:
+                  name: issue_opened_count
+                  type: INT
+              - column:
+                  name: issue_closed_count
+                  type: INT
+              - column:
+                  name: median_issue_close_days
+                  type: DOUBLE PRECISION
+              - column:
+                  name: pr_opened_count
+                  type: INT
+              - column:
+                  name: pr_merged_count
+                  type: INT
+              - column:
+                  name: median_pr_merge_days
+                  type: DOUBLE PRECISION
+              - column:
+                  name: active_contributors
+                  type: INT
+              - column:
+                  name: top_contributor_share
+                  type: DOUBLE PRECISION
+              - column:
+                  name: c_score
+                  type: DOUBLE PRECISION
+              - column:
+                  name: i_score
+                  type: DOUBLE PRECISION
+              - column:
+                  name: p_score
+                  type: DOUBLE PRECISION
+              - column:
+                  name: a_score
+                  type: DOUBLE PRECISION
+              - column:
+                  name: health_score
+                  type: INT
+              - column:
+                  name: last_issue_or_pr_sync_ts
+                  type: TIMESTAMP
+                  remarks: "Last time the issue/PR sync populated I/P inputs for this repo; drives the issue/PR sync queue."

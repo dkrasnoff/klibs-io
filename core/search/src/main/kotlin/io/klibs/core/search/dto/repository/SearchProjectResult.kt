@@ -24,5 +24,9 @@ data class SearchProjectResult(
     val targets: List<String> = emptyList(),
 
     val tags: List<String>,
-    val markers: List<String>
+    val markers: List<String>,
+
+    val dependentCount: Int = 0,
+
+    val ossHealthScore: Int? = null,
 )

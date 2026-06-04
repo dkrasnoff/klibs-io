@@ -1,21 +1,16 @@
 package io.klibs.app.indexing
 
 import io.klibs.app.indexing.discoverer.PackageDiscoverer
-import io.klibs.app.util.ANDROIDX_OWNER_AND_GITHUB_REPOSITORY
-import io.klibs.app.util.isAndroidxProject
 import io.klibs.app.util.normalizeGitHubLink
-import io.klibs.app.util.parseGitHubLink
 import io.klibs.app.util.toIndexRequest
 import io.klibs.core.pckg.dto.PackageDTO
 import io.klibs.core.pckg.entity.IndexingRequestEntity
 import io.klibs.core.pckg.enums.IndexingRequestStatus
-import io.klibs.core.pckg.model.Configuration
-import io.klibs.core.pckg.model.PackageDeveloper
-import io.klibs.core.pckg.model.PackageLicense
-import io.klibs.core.pckg.model.PackagePlatform
-import io.klibs.core.pckg.model.PackageTarget
+import io.klibs.core.pckg.dto.MavenCoordinatesDTO
+import io.klibs.core.pckg.enums.VersionType
 import io.klibs.core.pckg.repository.IndexingRequestRepository
 import io.klibs.core.pckg.repository.PackageRepository
+import io.klibs.core.pckg.service.MavenArtifactService
 import io.klibs.core.pckg.service.PackageService
 import io.klibs.core.project.ProjectEntity
 import io.klibs.core.scm.repository.ScmRepositoryEntity
@@ -24,8 +19,6 @@ import io.klibs.integration.maven.MavenArtifact
 import io.klibs.integration.maven.MavenPom
 import io.klibs.integration.maven.MavenStaticDataProvider
 import io.klibs.integration.maven.delegate.KotlinToolingMetadataDelegate
-import io.klibs.integration.maven.delegate.KotlinToolingMetadataDelegateImpl
-import io.klibs.integration.maven.delegate.KotlinToolingMetadataDelegateStubImpl
 import jakarta.transaction.Transactional
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -37,7 +30,6 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.supervisorScope
-import org.jetbrains.kotlin.tooling.KotlinToolingMetadata
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.ObjectProvider
 import org.springframework.stereotype.Service
@@ -48,11 +40,14 @@ class PackageIndexingService(
     private val providers: Map<String, MavenStaticDataProvider>,
     private val gitHubIndexingService: GitHubIndexingService,
     private val projectIndexingService: ProjectIndexingService,
+    private val pomIndexingService: PomIndexingService,
+    private val kotlinToolingMetadataIndexingService: KotlinToolingMetadataIndexingService,
     private val packageDescriptionGenerator: PackageDescriptionGenerator,
 
     private val indexingRequestRepository: IndexingRequestRepository,
     private val packageService: PackageService,
     private val packageRepository: PackageRepository,
+    private val mavenArtifactService: MavenArtifactService,
     private val selfProvider: ObjectProvider<PackageIndexingService>
 ) {
 
@@ -179,12 +174,19 @@ class PackageIndexingService(
 
         logger.trace("Persisting the package for {}", indexRequest)
         val packageDto = constructPackage(mavenArtifact, pom, toolingMetadata, project)
-        if (indexRequest.reindex) {
-            packageService.updateByCoordinates(packageDto)
+        val savedPackageId = if (indexRequest.reindex) {
+            val updated = packageService.updateByCoordinates(packageDto)
                 ?: error("Unable to update a non-existing artifact: $mavenArtifact")
+            updated.id
         } else {
-            packageRepository.save(packageDto.toEntity())
+            val mavenArtifactDto = mavenArtifactService.resolveOrCreate(
+                MavenCoordinatesDTO(pom.groupId, pom.artifactId, pom.version)
+            )
+            packageRepository.save(packageDto.toEntity(mavenArtifactDto)).id
         }
+
+        logger.trace("Extracting dependencies for {}", indexRequest)
+        pomIndexingService.indexDependencies(pom, requireNotNull(savedPackageId), indexRequest.reindex)
     }
 
     private fun IndexingRequestEntity.getMavenArtifact(): MavenArtifact {
@@ -203,19 +205,8 @@ class PackageIndexingService(
 
     private fun indexGitHubInfoIfPresent(pom: MavenPom): ScmRepositoryEntity? {
         // TODO an older version might not have the GitHub link set, but a newer one might have it. add a check
-        val (ownerLogin, name) = pom.extractGitHubRepoInfo() ?: return null
+        val (ownerLogin, name) = pomIndexingService.extractGitHubRepoInfo(pom) ?: return null
         return gitHubIndexingService.indexRepository(ownerLogin, name)
-    }
-
-    /**
-     * @return owner name to repo name
-     */
-    private fun MavenPom.extractGitHubRepoInfo(): Pair<String, String>? {
-        val parsedGitHubLink = scm?.url?.let(::parseGitHubLink) ?: url?.let(::parseGitHubLink)
-        if (parsedGitHubLink != null) return parsedGitHubLink
-
-        val isAndroidx = scm?.url?.isAndroidxProject() == true || url?.isAndroidxProject() == true
-        return if (isAndroidx) ANDROIDX_OWNER_AND_GITHUB_REPOSITORY else null
     }
 
     private fun constructPackage(
@@ -241,12 +232,12 @@ class PackageIndexingService(
             buildTool = toolingMetadata.buildSystem,
             buildToolVersion = toolingMetadata.buildSystemVersion,
             kotlinVersion = toolingMetadata.kotlinVersion,
-            developers = pom.extractDevelopers(),
-            licenses = pom.extractLicenses(),
-            configuration = toolingMetadata.toPackageConfiguration(),
+            developers = pomIndexingService.extractDevelopers(pom),
+            licenses = pomIndexingService.extractLicenses(pom),
+            configuration = kotlinToolingMetadataIndexingService.toPackageConfiguration(toolingMetadata),
             generatedDescription = descriptionWasGenerated,
-            targets = toolingMetadata.projectTargets.map { it.toPackageTarget() }
-                .distinct()
+            versionType = VersionType.from(pom.version),
+            targets = kotlinToolingMetadataIndexingService.extractTargets(toolingMetadata)
         )
     }
 
@@ -274,156 +265,6 @@ class PackageIndexingService(
             }
         }
         return Pair(description, descriptionWasGenerated)
-    }
-
-    private fun MavenPom.extractDevelopers(): List<PackageDeveloper> {
-        val developers = this.developers ?: return emptyList()
-
-        return developers.mapNotNull { dev ->
-            val name = (dev.name ?: dev.organization)
-                ?.takeIf { it.isNotBlank() }
-                ?: return@mapNotNull null
-
-            PackageDeveloper(
-                name = name,
-                url = dev.url ?: dev.email?.let { "mailto:$it" } ?: dev.organizationUrl
-            )
-        }
-    }
-
-    private fun MavenPom.extractLicenses(): List<PackageLicense> {
-        val licenses = this.licenses ?: return emptyList()
-        return licenses.mapNotNull { license ->
-            val name = license.name?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            PackageLicense(
-                name = name,
-                url = license.url
-            )
-        }
-    }
-
-    private fun KotlinToolingMetadataDelegate.toPackageConfiguration(): Configuration? {
-        return when (this) {
-            is KotlinToolingMetadataDelegateStubImpl -> null
-            is KotlinToolingMetadataDelegateImpl -> Configuration(
-                projectSettings = kotlinToolingMetadata.extractProjectSettings(),
-                jvmPlatform = kotlinToolingMetadata.extractJvmPlatformConfiguration(),
-                androidJvmPlatform = kotlinToolingMetadata.extractAndroidJvmPlatformConfiguration(),
-                nativePlatform = kotlinToolingMetadata.extractNativePlatformConfiguration(),
-                wasmPlatform = kotlinToolingMetadata.extractWasmPlatformConfiguration(),
-                jsPlatform = kotlinToolingMetadata.extractJsPlatformConfiguration(),
-            )
-        }
-    }
-
-    private fun KotlinToolingMetadata.extractProjectSettings(): Configuration.ProjectSettings {
-        return Configuration.ProjectSettings(
-            isHmppEnabled = this.projectSettings.isHmppEnabled,
-            isCompatibilityMetadataVariantEnabled = this.projectSettings.isCompatibilityMetadataVariantEnabled,
-        )
-    }
-
-    private fun KotlinToolingMetadata.extractJvmPlatformConfiguration(): Configuration.JvmPlatform? {
-        val jvmTarget = this.projectTargets.firstOrNull { it.platformType == "jvm" } ?: return null
-        val jvmExtras = jvmTarget.extras.jvm ?: return null
-        return Configuration.JvmPlatform(
-            jvmTarget = jvmExtras.jvmTarget,
-            withJavaEnabled = jvmExtras.withJavaEnabled
-        )
-    }
-
-    private fun KotlinToolingMetadata.extractAndroidJvmPlatformConfiguration(): Configuration.AndroidJvmPlatform? {
-        val androidJvmTarget = this.projectTargets.firstOrNull { it.platformType == "androidJvm" } ?: return null
-        val androidJvmExtras = androidJvmTarget.extras.android ?: return null
-        return Configuration.AndroidJvmPlatform(
-            sourceCompatibility = androidJvmExtras.sourceCompatibility,
-            targetCompatibility = androidJvmExtras.targetCompatibility
-        )
-    }
-
-    private fun KotlinToolingMetadata.extractNativePlatformConfiguration(): Configuration.NativePlatform? {
-        val nativeTargets = this.projectTargets.filter { it.platformType == "native" }
-        val chosenExtras = nativeTargets.firstNotNullOfOrNull { it.extras.native } ?: return null
-
-        val konanVersionsMatch = nativeTargets.all { isSameKonanVersion(it.extras.native, chosenExtras) }
-        require(konanVersionsMatch) {
-            "Konan configuration differs within one package: $this"
-        }
-
-        return Configuration.NativePlatform(
-            konanVersion = chosenExtras.konanVersion,
-            konanAbiVersion = chosenExtras.konanAbiVersion
-        )
-    }
-
-    private fun isSameKonanVersion(
-        first: KotlinToolingMetadata.ProjectTargetMetadata.NativeExtras?,
-        second: KotlinToolingMetadata.ProjectTargetMetadata.NativeExtras?
-    ): Boolean {
-        return first?.konanVersion == second?.konanVersion
-                && first?.konanAbiVersion == second?.konanAbiVersion
-    }
-
-    private fun KotlinToolingMetadata.extractWasmPlatformConfiguration(): Configuration.WasmPlatform? {
-        val wasmTarget = this.projectTargets.firstOrNull { it.platformType == "wasm" } ?: return null
-        val wasmExtras = wasmTarget.extras.js ?: return null
-        return Configuration.WasmPlatform(
-            isBrowserConfigured = wasmExtras.isBrowserConfigured,
-            isNodejsConfigured = wasmExtras.isNodejsConfigured
-        )
-    }
-
-    private fun KotlinToolingMetadata.extractJsPlatformConfiguration(): Configuration.JsPlatform? {
-        val jsTarget = this.projectTargets.firstOrNull { it.platformType == "js" } ?: return null
-        val jsExtras = jsTarget.extras.js ?: return null
-        return Configuration.JsPlatform(
-            isBrowserConfigured = jsExtras.isBrowserConfigured,
-            isNodejsConfigured = jsExtras.isNodejsConfigured
-        )
-    }
-
-    private fun KotlinToolingMetadata.ProjectTargetMetadata.toPackageTarget(): PackageTarget {
-        return PackageTarget(
-            platform = toPlatform(),
-            target = when (platformType) {
-                "common" -> null
-                "jvm" -> if (target == "com.android.build.api.variant.impl.KotlinMultiplatformAndroidLibraryTargetImpl") {
-                    // AGP 8.2-8.12
-                    extractAndroidTargetCompatibility()
-                } else {
-                    extras.jvm?.jvmTarget
-                }
-
-                "androidJvm" -> extras.android?.targetCompatibility
-                "wasm" -> null
-                "native" -> extras.native?.konanTarget
-                "js" -> null
-                else -> error("Unknown platform type: $platformType")
-            }
-        )
-    }
-
-    private fun extractAndroidTargetCompatibility(): String {
-        // Safe option, too hard to extract actual compatibility
-        return "1.8"
-    }
-
-    private fun KotlinToolingMetadata.ProjectTargetMetadata.toPlatform(): PackagePlatform {
-        return when (this.platformType) {
-            "common" -> PackagePlatform.COMMON
-            "jvm" -> if (target == "com.android.build.api.variant.impl.KotlinMultiplatformAndroidLibraryTargetImpl") {
-                // AGP 8.2-8.12
-                PackagePlatform.ANDROIDJVM
-            } else {
-                PackagePlatform.JVM
-            }
-
-            "androidJvm" -> PackagePlatform.ANDROIDJVM
-            "wasm" -> PackagePlatform.WASM
-            "native" -> PackagePlatform.NATIVE
-            "js" -> PackagePlatform.JS
-            else -> error("Unknown platform type: ${this.platformType}")
-        }
     }
 
     private companion object {

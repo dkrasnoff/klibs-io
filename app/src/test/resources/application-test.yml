@@ -2,7 +2,9 @@ klibs:
   indexing: false
   ai: false
   scheduling:
-    process-queue-job:
+    process-indexing-queue:
+      enabled: false
+    fill-version-type:
       enabled: false
 
 spring:

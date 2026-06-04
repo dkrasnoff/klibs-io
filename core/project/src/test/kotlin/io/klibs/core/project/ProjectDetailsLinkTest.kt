@@ -38,8 +38,10 @@ class ProjectDetailsLinkTest {
             licenseName = null,
             lastActivityAt = now,
             updatedAt = now,
+            dependentCount = 0,
             tags = emptyList(),
             markers = emptyList(),
+            ossHealthScore = null,
         )
     }
 

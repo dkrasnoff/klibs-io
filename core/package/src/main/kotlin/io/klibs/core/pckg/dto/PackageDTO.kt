@@ -2,6 +2,7 @@ package io.klibs.core.pckg.dto
 
 import io.klibs.core.pckg.entity.PackageEntity
 import io.klibs.core.pckg.entity.PackageTargetEntity
+import io.klibs.core.pckg.enums.VersionType
 import io.klibs.core.pckg.model.Configuration
 import io.klibs.core.pckg.model.PackageDeveloper
 import io.klibs.core.pckg.model.PackageLicense
@@ -31,13 +32,15 @@ data class PackageDTO(
     val licenses: List<PackageLicense>,
     val configuration: Configuration?,
     val generatedDescription: Boolean = false,
+    val versionType: VersionType? = null,
     val targets: List<PackageTarget> = emptyList()
 ) {
     /**
-     * Converts this DTO to an entity.
+     * Converts this DTO to an entity and applying maven artifact to it
+     *
      * @return PackageEntity created from this DTO
      */
-    fun toEntity(): PackageEntity {
+    fun toEntity(mavenArtifact: MavenArtifactDTO): PackageEntity {
         val entity = PackageEntity(
             id = id,
             projectId = projectId,
@@ -55,7 +58,9 @@ data class PackageDTO(
             developers = developers,
             licenses = licenses,
             configuration = configuration,
-            generatedDescription = generatedDescription
+            generatedDescription = generatedDescription,
+            versionType = versionType,
+            mavenArtifact = mavenArtifact.toEntityRef(),
         )
 
         // Add targets to the entity
@@ -95,6 +100,7 @@ data class PackageDTO(
                 licenses = entity.licenses,
                 configuration = entity.configuration,
                 generatedDescription = entity.generatedDescription,
+                versionType = entity.versionType,
                 targets = entity.targets.map { PackageTarget(it.platform, it.target) }
             )
         }
