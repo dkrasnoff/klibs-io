@@ -60,6 +60,13 @@ data class IndexingRequestEntity(
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false)
     val status: IndexingRequestStatus = IndexingRequestStatus.PENDING,
+
+    /**
+     * Number of the GitHub issue that created the indexing request via UserRequestCheckService;
+     * NULL in case of other services
+     */
+    @Column(name = "github_issue_number")
+    val githubIssueNumber: Int? = null,
 ) {
     val idNotNull: Long get() = requireNotNull(id)
 }

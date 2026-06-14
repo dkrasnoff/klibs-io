@@ -156,6 +156,9 @@ class UserRequestIndexingServiceTest : BaseUnitWithDbLayerTest() {
         assertEquals(ScraperType.USER_REQUEST, saved1.repo)
         assertEquals(ScraperType.USER_REQUEST, saved2.repo)
         assertEquals(ScraperType.USER_REQUEST, saved3.repo)
+        assertEquals(null, saved1.githubIssueNumber)
+        assertEquals(null, saved2.githubIssueNumber)
+        assertEquals(null, saved3.githubIssueNumber)
     }
 
     @Test
@@ -235,5 +238,30 @@ class UserRequestIndexingServiceTest : BaseUnitWithDbLayerTest() {
         assertEquals(ScraperType.USER_REQUEST, saved1.repo)
         assertEquals(ScraperType.USER_REQUEST, saved2.repo)
         assertEquals(ScraperType.USER_REQUEST, saved3.repo)
+    }
+
+    @Test
+    fun `should save GitHub issue number if provided`() {
+        val artifacts = listOf(
+            ArtifactData("com.example", "libA", "1.0.0"),
+            ArtifactData("com.example", "libA", "2.0.0"),
+            ArtifactData("com.example", "libB", "1.0.0"),
+        )
+        whenever(centralSonatypeSearchClient.searchWithThrottle(eq(0), any(), any()))
+            .thenReturn(MavenSearchResponse(totalHits = 3, currentHits = 3, page = artifacts))
+        whenever(centralSonatypeSearchClient.searchWithThrottle(eq(1), any(), any()))
+            .thenReturn(MavenSearchResponse(totalHits = 3, currentHits = 0, page = emptyList()))
+
+        uut.indexUserRequest("com.example", null, null, 123)
+
+        val saved1 = indexingRequestRepository.findByGroupIdAndArtifactIdAndVersion("com.example", "libA", "1.0.0")
+        val saved2 = indexingRequestRepository.findByGroupIdAndArtifactIdAndVersion("com.example", "libA", "2.0.0")
+        val saved3 = indexingRequestRepository.findByGroupIdAndArtifactIdAndVersion("com.example", "libB", "1.0.0")
+        assertTrue(saved1 != null, "First artifact should be saved")
+        assertTrue(saved2 != null, "Second artifact should be saved")
+        assertTrue(saved3 != null, "Third artifact should be saved")
+        assertEquals(123, saved1.githubIssueNumber)
+        assertEquals(123, saved2.githubIssueNumber)
+        assertEquals(123, saved3.githubIssueNumber)
     }
 }

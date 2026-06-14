@@ -165,7 +165,7 @@ class UserRequestCheckService(
         }
 
         return try {
-            userRequestIndexingService.indexUserRequest(groupId, artifactId, version)
+            userRequestIndexingService.indexUserRequest(groupId, artifactId, version, issue.number)
             publishIssueStatus(
                 issue.number,
                 UserRequestMessages.success(groupId, artifactId, version)

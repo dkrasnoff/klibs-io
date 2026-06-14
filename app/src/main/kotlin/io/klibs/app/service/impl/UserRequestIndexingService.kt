@@ -28,11 +28,12 @@ class UserRequestIndexingService(
      * @param groupId Maven group ID (required)
      * @param artifactId Maven artifact ID (optional - if null, all artifacts in the group are indexed)
      * @param version Maven version (optional - if null, all versions of the artifact(s) are indexed)
+     * @param githubIssueNumber Number of the GitHub issue that requested indexing
      */
     @Transactional
-    fun indexUserRequest(groupId: String, artifactId: String?, version: String?) {
+    fun indexUserRequest(groupId: String, artifactId: String?, version: String?, githubIssueNumber: Int? = null) {
         val artifacts = discoverArtifacts(groupId, artifactId, version)
-        saveUserRequests(artifacts)
+        saveUserRequests(artifacts, githubIssueNumber)
     }
 
     private fun discoverArtifacts(
@@ -120,8 +121,8 @@ class UserRequestIndexingService(
             )
         }
 
-    private fun saveUserRequests(mavenArtifacts: List<MavenArtifact>) {
-        val requests = mavenArtifacts.map { it.toIndexRequest() }
+    private fun saveUserRequests(mavenArtifacts: List<MavenArtifact>, githubIssueNumber: Int?) {
+        val requests = mavenArtifacts.map { it.toIndexRequest(githubIssueNumber = githubIssueNumber) }
 
         try {
             indexingRequestRepository.saveAll(requests)

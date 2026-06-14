@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: add github_issue_number column to package_index_request
+      author: zofia.zuzanna.wiora@gjetbrains.com
+      comment: "KTL-4175: Store the id of GitHub issue, so the information about processing of the user's request can be later posted to the issue"
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            columnExists:
+              tableName: package_index_request
+              columnName: github_issue_number
+      changes:
+        - addColumn:
+            tableName: package_index_request
+            columns:
+              - column:
+                  name: github_issue_number
+                  type: INTEGER
