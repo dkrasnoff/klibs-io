@@ -1,0 +1,29 @@
+.wrapper {
+    display: flex;
+    text-align: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+}
+
+.sort {
+    display: flex;
+    margin-left: auto;
+}
+
+.trigger {
+    color: #0067FF;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.ossHealthTooltip {
+    display: block;
+    width: 180px;
+}
+
+.active {
+    background: #0067FF;
+    & span {
+        color: #ffffff !important;
+    }
+}
