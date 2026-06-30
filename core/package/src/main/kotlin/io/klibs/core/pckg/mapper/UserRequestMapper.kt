@@ -17,7 +17,6 @@ abstract class UserRequestMapper {
             artifactId = dto.artifactId,
             version = dto.version,
             processingStatus = UserRequestProcessingStatus.NEW,
-            failedAttempts = 0
         )
     }
 }

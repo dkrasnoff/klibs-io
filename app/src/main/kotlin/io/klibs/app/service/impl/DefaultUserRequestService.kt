@@ -6,6 +6,7 @@ import io.klibs.app.service.UserIssueNotifier
 import io.klibs.app.service.UserRequestService
 import io.klibs.core.pckg.dto.UserIndexingRequestDto
 import io.klibs.core.pckg.entity.UserRequestIssueEntity
+import io.klibs.core.pckg.enums.UserRequestProcessingStatus
 import io.klibs.core.pckg.mapper.UserRequestMapper
 import io.klibs.core.pckg.repository.UserRequestIssueRepository
 import io.klibs.integration.maven.dto.GavCoordinatesDTO
@@ -84,13 +85,20 @@ internal class DefaultUserRequestService(
         val issueNumber = savedIssueRequest.githubIssueNumber
         try {
             userIndexingRequestService.fulfillRequest(requireNotNull(savedIssueRequest.id))
-            userIssueNotifier.notifySuccess(issueNumber)
+            updateProcessingStatus(savedIssueRequest, UserRequestProcessingStatus.ACCEPTED)
+            userIssueNotifier.notifyAccepted(issueNumber)
         } catch (e: UserRequestProcessingException) {
+            updateProcessingStatus(savedIssueRequest, UserRequestProcessingStatus.REJECTED)
             userIssueNotifier.notifyFailure(issueNumber, e.reason)
         } catch (e: Exception) {
             logger.error("Background processing failed for issue #${issueNumber}", e)
+            updateProcessingStatus(savedIssueRequest, UserRequestProcessingStatus.FAILED)
             userIssueNotifier.notifyServerErrorFailure(issueNumber)
         }
+    }
+
+    private fun updateProcessingStatus(issue: UserRequestIssueEntity, status: UserRequestProcessingStatus) {
+        userRequestIssueRepository.save(issue.copy(processingStatus = status))
     }
 
 

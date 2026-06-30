@@ -1,6 +1,7 @@
 package io.klibs.app.indexing
 
 import io.klibs.app.indexing.discoverer.PackageDiscoverer
+import io.klibs.app.service.UserRequestReportWriter
 import io.klibs.app.util.normalizeGitHubLink
 import io.klibs.app.util.toIndexRequest
 import io.klibs.core.pckg.dto.PackageDTO
@@ -45,6 +46,7 @@ class PackageIndexingService(
     private val packageDescriptionGenerator: PackageDescriptionGenerator,
 
     private val indexingRequestRepository: IndexingRequestRepository,
+    private val userRequestReportWriter: UserRequestReportWriter,
     private val packageService: PackageService,
     private val packageRepository: PackageRepository,
     private val mavenArtifactService: MavenArtifactService,
@@ -105,22 +107,31 @@ class PackageIndexingService(
      * @return true if a package indexing request was processed, false if the queue is empty.
      */
     fun processPackageQueue(): Boolean {
-        var indexRequestId: Long? = null
+        val indexRequest = indexingRequestRepository.findFirstForIndexing()
+        if (indexRequest == null) {
+            logger.info("The package index queue is empty")
+            return false
+        }
+        val requestId = indexRequest.idNotNull
+        var succeeded = false
+        var errorMessage: String? = null
         try {
-            val indexRequest = indexingRequestRepository.findFirstForIndexing()
-            if (indexRequest == null) {
-                logger.info("The package index queue is empty")
-                return false
-            } else {
-                indexRequestId = indexRequest.idNotNull
-                selfProvider.getObject().processRequest(indexRequestId)
-            }
+            selfProvider.getObject().processRequest(requestId)
+            succeeded = true
         } catch (e: Exception) {
+            errorMessage = e.message
             logger.error("Error during claiming an indexing request: ${e.message}", e)
+        } finally {
             try {
-                indexRequestId?.let { indexingRequestRepository.markAsFailed(it, e.message) }
+                if (succeeded) {
+                    userRequestReportWriter.saveSuccessReport(requestId)
+                    indexingRequestRepository.deleteById(requestId)
+                } else {
+                    indexingRequestRepository.markAsFailed(requestId, errorMessage)
+                    userRequestReportWriter.saveFailureReportIfTerminal(requestId, errorMessage)
+                }
             } catch (ex: Exception) {
-                logger.error("Error during marking index request with id=$indexRequestId: ${ex.message}", ex)
+                logger.error("Error during finalizing index request with id=$requestId: ${ex.message}", ex)
             }
         }
         return true
@@ -137,7 +148,6 @@ class PackageIndexingService(
         } else {
             logger.error("Multi-version indexing requests are not supported")
         }
-        indexingRequestRepository.deleteById(indexRequest.idNotNull)
         logger.debug("Processed an indexing request for {}", indexRequest)
     }
 
