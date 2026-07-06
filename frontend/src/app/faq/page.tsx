@@ -14,7 +14,7 @@ import cn from "classnames";
 const SUBMIT_ISSUE_URL =
     "https://github.com/JetBrains/klibs-io-issue-management/issues/new?assignees=&labels=question&projects=&template=question.md&title=";
 const REQUEST_INDEXING_URL =
-    "https://github.com/JetBrains/klibs-io-issue-management/issues/new?assignees=&labels=index-request&projects=&template=index_request.yml";
+    "https://github.com/dkrasnoff/klibs-io/issues/new?template=index_request.yml";
 const POM_EXAMPLE_URL =
     "https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core/1.8.0/kotlinx-coroutines-core-1.8.0.pom";
 const TOOLING_METADATA_EXAMPLE_URL =

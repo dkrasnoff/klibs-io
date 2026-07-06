@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 @ConditionalOnProperty("klibs.indexing", havingValue = "true")
 class MaterializedViewUpdatingJob(val searchService: SearchService) {
 
-    @Scheduled(initialDelay = 0, fixedRate = 10, timeUnit = TimeUnit.MINUTES)
+    @Scheduled(initialDelay = 0, fixedRate = 1, timeUnit = TimeUnit.MINUTES)
     @SchedulerLock(name = "updateMaterializedViewsLock", lockAtMostFor = "10m")
     fun updateMaterializedViews() {
         LockAssert.assertLocked();

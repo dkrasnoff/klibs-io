@@ -45,7 +45,7 @@ async function fetchInsightsProjects(
     params.set("limit", String(limit));
     const res = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/search/projects?${params.toString()}`,
-        { next: { revalidate: 600 } }
+        { next: { revalidate: 60 } }
     );
     return (await res.json()) as InsightsProject[];
 }

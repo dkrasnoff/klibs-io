@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 @ConditionalOnProperty("klibs.indexing", havingValue = "true")
 class UserRequestReportingJob(private val userRequestReportingService: UserRequestReportingService) {
 
-    @Scheduled(initialDelay = 0, fixedRate = 10, timeUnit = TimeUnit.MINUTES)
+    @Scheduled(initialDelay = 0, fixedRate = 1, timeUnit = TimeUnit.MINUTES)
     @SchedulerLock(name = "userRequestReportingLock", lockAtMostFor = "5m")
     fun reportUserRequestStatuses() {
         LockAssert.assertLocked()

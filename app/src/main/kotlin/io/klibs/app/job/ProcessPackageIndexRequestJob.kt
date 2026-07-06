@@ -15,8 +15,8 @@ import java.util.concurrent.TimeUnit
 )
 class ProcessPackageIndexRequestJob(val packageIndexingService: PackageIndexingService) {
 
-    @Scheduled(initialDelay = 0, fixedRate = 4, timeUnit = TimeUnit.HOURS)
-    @SchedulerLock(name = "processPackageIndexRequestsLock", lockAtMostFor = "4h")
+    @Scheduled(initialDelay = 0, fixedRate = 1, timeUnit = TimeUnit.MINUTES)
+    @SchedulerLock(name = "processPackageIndexRequestsLock", lockAtMostFor = "10m")
     fun processPackageIndexRequests() {
         LockAssert.assertLocked();
         while (packageIndexingService.processPackageQueue()) {
